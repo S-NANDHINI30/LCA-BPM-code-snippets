@@ -1,0 +1,101 @@
+import org.joget.apps.app.service.AppUtil;
+import org.joget.apps.form.model.*;
+import org.joget.commons.util.LogUtil;
+import org.joget.plugin.base.PluginManager;
+import java.sql.Connection;
+import javax.sql.DataSource;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+// public class TestRunCreation {
+        public FormRowSet store(Element element, FormRowSet rows, FormData formData) {
+
+                FormRow originalRow = rows.get(0);
+                FormRow row = rows.get(0);
+                String projectId = checkNull(row.getProperty("projectId"));
+                String sectionId = checkNull(row.getProperty("sectionId"));
+                String caseId = checkNull(row.getProperty("sectionId"));
+                String projectCode = row.getProperty("projectCode");
+                String mode = "#requestParam.mode#";
+                Connection con = null;
+                try {
+                        LogUtil.info("projectcod",projectCode);
+                        LogUtil.info("projectId",projectId);
+                        // Establish database connection
+                        DataSource ds = (DataSource) AppUtil.getApplicationContext().getBean("setupDataSource");
+                        // Get data source
+                        con = ds.getConnection();
+                        if (!con.isClosed()) {
+                                LogUtil.info(" section Id ", sectionId);
+                                // Fetch the last inserted case ID for the given project
+                                String query = "SELECT * FROM app_fd_tv_test_cases where c_projectId='" + projectId + "'" +
+                                        " ORDER BY c_caseId DESC Limit 1";
+                                PreparedStatement stmt = con.prepareStatement(query);
+                                ResultSet rs = stmt.executeQuery();
+                                LogUtil.info(query,"query");
+                                int lastCaseId = 0;
+                                int newCaseId = 0;
+                                LogUtil.info("query",query);
+                                if (rs.next()) {
+                                        String lastCaseIdStr = rs.getString("c_caseId");
+                                        lastCaseId = Integer.parseInt(lastCaseIdStr.split("-")[2]);
+                                }
+                                LogUtil.info(String.valueOf(lastCaseId),"last case id");
+                                newCaseId = lastCaseId + 1;
+                                LogUtil.info(String.valueOf(newCaseId),"new case id");
+                                String nextCaseId = addPrefix(newCaseId, 4);
+                                LogUtil.info(nextCaseId,"next case id");
+                                caseId = projectCode + "-" + "TCID-" + nextCaseId;
+                                if(!mode.equals("edit")){
+                                        originalRow.setProperty("caseId", caseId);
+                                }
+                                normalStoring(element, rows, formData);
+
+                        }
+                } catch (Exception ex) {
+                        LogUtil.error("Create Test Case", ex, "Error storing using JDBC");
+                } finally {
+                        // Close the database connection
+                        try {
+                                if (con != null) {
+                                        con.close();
+                                }
+                        } catch (Exception ex) {
+                                LogUtil.error("", ex, "Error closing the JDBC connection");
+                        }
+                }
+
+                return rows;
+        }
+
+        // Method to add prefix to a number
+        public static String addPrefix(int number, int totalDigits) {
+                String numberStr = Integer.toString(number);
+                int numZeros = totalDigits - numberStr.length();
+                StringBuilder result = new StringBuilder();
+                // Append the necessary zeros
+                for (int i = 0; i < numZeros; i++) {
+                        result.append('0');
+                }
+                // Append the number
+                result.append(numberStr);
+                return result.substring(result.length() - totalDigits);
+        }
+
+        public String checkNull(String value) {
+                if (value == null || value.trim().length() == 0) {
+                        value = "";
+                }
+                return value;
+        }
+
+        //this function will reuse workflow form binder to store data
+        public void normalStoring(Element element, FormRowSet rows, FormData formData) {
+                PluginManager pluginManager = (PluginManager) AppUtil.getApplicationContext().getBean("pluginManager");
+                FormStoreBinder binder = (FormStoreBinder) pluginManager.getPlugin("org.joget.apps.form.lib.WorkflowFormBinder");
+                binder.store(element, rows, formData);
+        }
+
+// }
+
+// Create an instance of the sample class and call the store method
+        return store(element, rows, formData);
