@@ -1,0 +1,241 @@
+import org.joget.apps.app.service.AppPluginUtil;
+import org.joget.apps.app.service.AppService;
+import org.joget.apps.app.service.AppUtil;
+import org.joget.apps.datalist.model.DataListActionResult;
+import org.joget.apps.form.model.*;
+import org.joget.commons.util.LogUtil;
+import org.joget.plugin.base.ApplicationPlugin;
+import org.joget.plugin.base.Plugin;
+import org.joget.plugin.base.PluginManager;
+import org.joget.plugin.property.model.PropertyEditable;
+
+import java.sql.Connection;
+import javax.sql.DataSource;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.Map;
+import java.util.UUID;
+
+// public class TestResultsUpdate {
+
+    String caseId = "";
+    String testedBy = "";
+    String dateOfExecution = "";
+    String comments = "";
+    String testStatus = "";
+    String sectionId = "";
+    String timeSpent = "";
+    String actualResult = "";
+    String testRunId = "";
+    String tid = "";
+    String attachments = "";
+    String projectName="";
+    boolean redirectToPendingTestRun = false; // Flag to determine if redirection is needed
+
+    public FormRowSet store(Element element, FormRowSet rows, FormData formData) {
+        FormRow row = rows.get(0);
+        Connection con = null;
+        LogUtil.info(row.getProperty("caseId"), "caseid");
+        String[] rowIds = row.getProperty("caseId").split(";");
+        LogUtil.info(Arrays.toString(rowIds), "rowIds");
+        testedBy = row.getProperty("testedBy");
+        dateOfExecution = row.getProperty("dateOfExecution");
+        comments = row.getProperty("resultComments");
+        testStatus = row.getProperty("testCaseStatus");
+        timeSpent = row.getProperty("timeSpent");
+        actualResult = row.getProperty("actualResult");
+        testRunId = row.getProperty("testRunId");
+        attachments = row.getProperty("attachments");
+        LogUtil.info(testStatus, "testStatus");
+        tid = row.getProperty("tid");
+        LogUtil.info(testedBy, "testedBy");
+        for (String rowId : rowIds) {
+            try {
+                LogUtil.info(rowId, "row id");
+                caseId = rowId;
+                DataSource ds = (DataSource) AppUtil.getApplicationContext().getBean("setupDataSource");
+                con = ds.getConnection();
+                PreparedStatement pstmt = null;
+                PreparedStatement upstmt = null;
+                if (!con.isClosed()) {
+                    String updateQuery = "UPDATE app_fd_tv_test_case_results SET " +
+                            "c_testCaseStatus = ?, " +
+                            "c_dateOfExecution = ?, " +
+                            "c_resultComments = ?, " +
+                            "c_testedBy = ?," +
+                            "c_timeSpent = ?," +
+                            "c_actualResult = ?," +
+                            "c_attachments = ?" +
+                            " WHERE c_caseId = '" + caseId + "' and c_testRunId='" + testRunId + "'";
+                    pstmt = con.prepareStatement(updateQuery);
+                    pstmt.setString(1, testStatus);
+                    pstmt.setString(2, dateOfExecution);
+                    pstmt.setString(3, comments);
+                    pstmt.setString(4, testedBy);
+                    pstmt.setString(5, timeSpent);
+                    pstmt.setString(6, actualResult);
+                    pstmt.setString(7, attachments);
+                    pstmt.executeUpdate();
+                    int val = getResultCount(con);
+                    LogUtil.info(String.valueOf(val), "val");
+                    if (val == 0) {
+                        LogUtil.info("count is zero", "");
+                        updateCompletedStatus(con);
+                    } else {
+                        updateProgressStatus(con);
+                    }
+                }
+                normalStoring(element, rows, formData);
+
+            } catch (Exception ex) {
+                LogUtil.error("", ex, "Error storing using JDBC");
+            } finally {
+                try {
+                    if (con != null) {
+                        con.close();
+                    }
+                } catch (Exception ex) {
+                    LogUtil.error("", ex, "Error closing the JDBC connection");
+                }
+            }
+        }
+        if (redirectToPendingTestRun) {
+            String url = "#envVariable.appUrl#/jw/web/userview/test_vantage/testVantageDesign/_/pendingTestRunsTesters";
+            DataListActionResult result = new DataListActionResult();
+            result.setType(DataListActionResult.TYPE_REDIRECT);
+            result.setUrl(url);
+            LogUtil.info(url, "url");
+        }
+        return rows;
+    }
+
+    public int getResultCount(Connection con) {
+        PreparedStatement pstmt = null;
+        ResultSet rs = null;
+        int getCount = 0;
+        try {
+            if (!con.isClosed()) {
+                LogUtil.info("entered", "");
+                String query = "select count(*) from app_fd_tv_test_case_results where c_testRunId = '" + testRunId + "' and c_testCaseStatus ='Pending' ";
+                pstmt = con.prepareStatement(query);
+                rs = pstmt.executeQuery();
+                LogUtil.info("query", query);
+                if (rs.next()) {
+                    getCount = rs.getInt(1);
+                    LogUtil.info(String.valueOf(getCount), "getcount");
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.error("Update Test Run", e, "Error storing user data in bean shell binder");
+        }
+        return getCount;
+    }
+
+    public void updateCompletedStatus(Connection con) {
+        PreparedStatement upstmt = null;
+        try {
+            if (!con.isClosed()) {
+                String updatestatusQuery = "UPDATE app_fd_tv_test_runs SET " +
+                        "c_testRunStatus = 'Completed' " +
+                        " WHERE c_testRunId='"+testRunId+"'";
+                // String updatestatusQuery = "UPDATE app_fd_tv_test_runs SET " +
+                //         "c_testRunStatus = 'Completed' " +
+                //         " WHERE c_testRunId='" + testRunId + "' AND " +
+                //         " NOT EXISTS (SELECT 1 FROM app_fd_tv_test_case_results WHERE c_testRunId = '" + testRunId + "' AND c_testCaseStatus = 'Hold')";
+                upstmt = con.prepareStatement(updatestatusQuery);
+                upstmt.executeUpdate();
+                LogUtil.info(updatestatusQuery, "updatestatusQuery");
+                sendEmail (con,testRunId);
+            }
+        } catch (Exception e) {
+            LogUtil.error("Update Test Run", e, "Error storing user data in bean shell binder");
+        }
+    }
+
+    public void updateProgressStatus(Connection con) {
+        PreparedStatement upstmt = null;
+        try {
+            if (!con.isClosed()) {
+                String updatestatusQuery = "UPDATE app_fd_tv_test_runs SET " +
+                        "c_testRunStatus = 'In-Progress' " +
+                        " WHERE c_testRunId='" + testRunId + "'";
+                upstmt = con.prepareStatement(updatestatusQuery);
+                upstmt.executeUpdate();
+                LogUtil.info(updatestatusQuery, "updatestatusQuery");
+            }
+        } catch (Exception e) {
+            LogUtil.error("Update Test Run", e, "Error storing user data in bean shell binder");
+        }
+    }
+    public void sendEmail (Connection con,String testRunId) {
+        String testRunName ="";
+        String testRunTesters="";
+        String assignedBy="";
+        try {
+            if (!con.isClosed()) {
+                String query = "select * from app_fd_tv_test_runs where c_testRunId='"+testRunId+"'";
+                PreparedStatement stmt = con.prepareStatement(query);
+                ResultSet rs = stmt.executeQuery();
+                LogUtil.info("query", query);
+                if (rs.next()) {
+                    testRunName=rs.getString("c_testRunName");
+                    LogUtil.info(assignedBy,"assigned by");
+                    testRunTesters=rs.getString("c_testRunTesters");
+                    LogUtil.info(testRunTesters,"testRunTesters");
+                    assignedBy=rs.getString("createdByName");
+                    LogUtil.info(assignedBy,"assigned by");
+                }
+            }
+        } catch (Exception e) {
+            LogUtil.error("Update Test Run", e, "Error storing user data in bean shell binder");
+        }
+        LogUtil.info("entered", "");
+        LogUtil.info("testRunName", testRunName);
+        LogUtil.info("testRunId", testRunId);
+        LogUtil.info("testRunTesters", testRunTesters);
+        LogUtil.info("project name", projectName);
+        LogUtil.info("assigned by", assignedBy);
+        String messageBody="";
+        messageBody = "<div><p>Dear User,</p>" +
+                "<p>A Test Run has been completed by updating all the test cases assigned to it</p></div>";
+        messageBody += "<p>Regards,</p>";
+        messageBody += "<p>Test Management</p>";
+        LogUtil.info("message body",messageBody);
+        AppService appService = (AppService) AppUtil.getApplicationContext().getBean("appService");
+        appDef = appService.getAppDefinition("test_vantage", null);
+        PluginManager pluginManager = (PluginManager) AppUtil.getApplicationContext().getBean("pluginManager");
+        //Reuse Email Tool to send separated email to a list of users;
+        Plugin plugin = pluginManager.getPlugin("org.joget.apps.app.lib.EmailTool");
+        //Get default properties (SMTP setting) for email tool
+        //HttpServletRequest request = WorkflowUtil.getHttpServletRequest();
+        Map propertiesMap = AppPluginUtil.getDefaultProperties(plugin, (String) null, appDef, null);
+        propertiesMap.put("pluginManager", pluginManager);
+        propertiesMap.put("appDef", appDef);
+        //propertiesMap.put("request", request);
+        String subject = "Test Run Status Update";
+        LogUtil.info("Email Body ", messageBody);
+        ApplicationPlugin emailTool = (ApplicationPlugin) plugin;
+
+        propertiesMap.put("toSpecific", "nandhini.shanmugasundaram@eleviant.com");
+//        propertiesMap.put("cc", "nandhini.shanmugasundaram@eleviant.com");
+        propertiesMap.put("subject", subject);
+        propertiesMap.put("message", messageBody);
+        propertiesMap.put("isHtml", "true");
+        //set properties and execute the tool
+        ((PropertyEditable) emailTool).setProperties(propertiesMap);
+        emailTool.execute(propertiesMap);
+        LogUtil.info("msg", messageBody);
+    }
+    public void normalStoring(Element element, FormRowSet rows, FormData formData) {
+        PluginManager pluginManager = (PluginManager) AppUtil.getApplicationContext().getBean("pluginManager");
+        FormStoreBinder binder = (FormStoreBinder) pluginManager.getPlugin("org.joget.apps.form.lib.WorkflowFormBinder");
+        binder.store(element, rows, formData);
+    }
+// }
+        return store(element, rows, formData);
+//return result;
