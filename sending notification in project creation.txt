@@ -1,0 +1,109 @@
+import org.joget.apps.app.model.AppDefinition;
+import org.joget.apps.app.service.AppPluginUtil;
+import org.joget.apps.app.service.AppService;
+import org.joget.apps.app.service.AppUtil;
+import org.joget.commons.util.LogUtil;
+import org.joget.plugin.base.ApplicationPlugin;
+import org.joget.plugin.base.Plugin;
+import org.joget.plugin.base.PluginManager;
+import org.joget.workflow.model.WorkflowAssignment;
+import org.joget.plugin.property.model.PropertyEditable;
+import javax.servlet.http.HttpServletRequest;
+import java.util.*;
+
+// public class MailTool {
+    public Object execute(WorkflowAssignment assignment, AppDefinition appDef, HttpServletRequest request) {
+        String messageBody = "";
+        String manager = "#form.tv_projects.projectManager#";
+        String tester = "#form.tv_projects.projectTester#";
+        String lead = "#form.tv_projects.projectLead#";
+        String managerFullName = "#user." + manager + ".fullName#";
+        String projectName = "#form.tv_projects.projectName#";
+        String startDate = "#form.tv_projects.projectStartDate#";
+        String endDate = "#form.tv_projects.projectEndDate#";
+        String projectCode = "#form.tv_projects.projectCode#";
+        String createdBy = "#currentUser.fullName#";
+
+        LogUtil.info(startDate, "start date");
+        LogUtil.info(endDate, "end date");
+        LogUtil.info(tester, "testers");
+
+        String testerFullNames = getFullNames(tester);
+        String leadFullNames = getFullNames(lead);
+
+        String ccAddresses = getEmails(tester) + "," + getEmails(lead);
+
+        messageBody += "<p>Dear All, </p>" +
+                "<p>A new project has been created by " + createdBy + " with the following details:</p>\n" +
+                "<p><b>Project Name:</b> " + projectName + "</p>\n" +
+                "<p><b>Project Code:</b> " + projectCode + "</p>\n" +
+                "<p><b>Start Date:</b> " + startDate + "</p>\n" +
+                "<p><b>End Date:</b> " + endDate + "</p>\n" +
+                "<p><b>Project Manager:</b> " + managerFullName + "</p>\n" +
+                "<p><b>Project Tester(s):</b> " + testerFullNames + "</p>\n" +
+                "<p><b>Project Lead(s):</b> " + leadFullNames + "</p>\n" +
+                "<br>"+
+                "<a href='#envVariable.appUrl#/jw/web/userview/test_vantage/testVantageDesign/_/projects'>Click here to view the project details</a><br>"+
+                "<p>Best regards," +
+                "<br/>Eleviant CTG Pvt Ltd.</p>";
+
+        AppService appService = (AppService) AppUtil.getApplicationContext().getBean("appService");
+        appDef = appService.getAppDefinition("test_vantage", null);
+
+        PluginManager pluginManager = (PluginManager) AppUtil.getApplicationContext().getBean("pluginManager");
+
+        // Reuse Email Tool to send separated email to a list of users
+        Plugin plugin = pluginManager.getPlugin("org.joget.apps.app.lib.EmailTool");
+
+        // Get default properties (SMTP setting) for email tool
+        Map propertiesMap = AppPluginUtil.getDefaultProperties(plugin, (String) null, appDef, null);
+        propertiesMap.put("pluginManager", pluginManager);
+        propertiesMap.put("appDef", appDef);
+        String subject = "A New Project was Created";
+        ApplicationPlugin emailTool = (ApplicationPlugin) plugin;
+
+        propertiesMap.put("toSpecific", manager);
+        propertiesMap.put("cc", ccAddresses);
+        propertiesMap.put("subject", subject);
+        propertiesMap.put("message", messageBody);
+        propertiesMap.put("isHtml", "true");
+
+        // Set properties and execute the tool
+        ((PropertyEditable) emailTool).setProperties(propertiesMap);
+        emailTool.execute(propertiesMap);
+
+        return null;
+    }
+
+    private String getFullNames(String userIdentifiers) {
+        String[] identifiers = userIdentifiers.split(";");
+        StringBuilder fullNames = new StringBuilder();
+        for (String id : identifiers) {
+            if (!id.trim().isEmpty()) {
+                String fullName = "#user." + id.trim() + ".fullName#";
+                if (fullNames.length() > 0) {
+                    fullNames.append(", ");
+                }
+                fullNames.append(fullName);
+            }
+        }
+        return fullNames.toString();
+    }
+
+    private String getEmails(String userIdentifiers) {
+        String[] identifiers = userIdentifiers.split(";");
+        StringBuilder emails = new StringBuilder();
+        for (String id : identifiers) {
+            if (!id.trim().isEmpty()) {
+                String email = "#user." + id.trim() + ".email#";
+                if (emails.length() > 0) {
+                    emails.append(",");
+                }
+                emails.append(email);
+            }
+        }
+        return emails.toString();
+    }
+// }
+
+        return execute(workflowAssignment, appDef, request);
