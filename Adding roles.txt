@@ -1,0 +1,116 @@
+import org.joget.apps.app.service.AppUtil;
+import org.joget.apps.form.model.*;
+import org.joget.commons.util.LogUtil;
+import org.joget.plugin.base.PluginManager;
+import java.sql.Connection;
+import javax.sql.DataSource;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
+
+// public class Sample {
+
+    public FormRowSet store(Element element, FormRowSet rows, FormData formData) {
+        FormRow row = rows.get(0);
+        Connection con = null;
+        String projectManager = row.getProperty("projectManager");
+        String tester = row.getProperty("tester");
+        String lead = row.getProperty("lead");
+        String roleType = row.getProperty("roleType");
+        LogUtil.info(roleType, "type");
+        try {
+            DataSource ds = (DataSource) AppUtil.getApplicationContext().getBean("setupDataSource");
+            con = ds.getConnection();
+            if (!con.isClosed()) {
+                LogUtil.info("tester", tester);
+                updateGroup(con, tester, "tvTesters");
+                updateGroup(con, projectManager, "testVantageManagers");
+                updateGroup(con, lead, "testVantageLead");
+            }
+        } catch (Exception ex) {
+            LogUtil.error("update name", ex, "Error while storing data");
+        } finally {
+            try {
+                if (con != null) {
+                    con.close();
+                }
+            } catch (Exception ex) {
+                LogUtil.error("", ex, "Error closing connection");
+            }
+        }
+        normalStoring(element, rows, formData);
+        return rows;
+    }
+
+    private void updateGroup(Connection con, String users, String groupId) throws Exception {
+        if (users != null) {
+            String[] userIds = users.isEmpty() ? new String[0] : users.split(";");
+            List newUserIdList = Arrays.asList(userIds);
+
+            // Fetch current users in the group
+            String selectCurrentUsersQuery = "SELECT userId FROM dir_user_group WHERE groupId = ?";
+            PreparedStatement selectCurrentUsersStmt = con.prepareStatement(selectCurrentUsersQuery);
+            selectCurrentUsersStmt.setString(1, groupId);
+            ResultSet currentUsersRs = selectCurrentUsersStmt.executeQuery();
+
+            List currentUserIdList = new ArrayList();
+            while (currentUsersRs.next()) {
+                currentUserIdList.add(currentUsersRs.getString("userId"));
+            }
+            currentUsersRs.close();
+            selectCurrentUsersStmt.close();
+
+            // Delete users that are no longer in the provided list
+            for (int i = 0; i < currentUserIdList.size(); i++) {
+                String currentUserId = (String) currentUserIdList.get(i);
+                if (!newUserIdList.contains(currentUserId)) {
+                    String deleteQuery = "DELETE FROM dir_user_group WHERE groupId = ? AND userId = ?";
+                    PreparedStatement deleteStmt = con.prepareStatement(deleteQuery);
+                    deleteStmt.setString(1, groupId);
+                    deleteStmt.setString(2, currentUserId);
+                    deleteStmt.executeUpdate();
+                    deleteStmt.close();
+                    LogUtil.info("Deleted user from group", currentUserId);
+                }
+            }
+
+            // Insert new users that are not already in the group
+            for (int j = 0; j < userIds.length; j++) {
+                String userId = userIds[j];
+                String selectQuery = "SELECT * FROM dir_user WHERE id=?";
+                PreparedStatement stmt = con.prepareStatement(selectQuery);
+                stmt.setString(1, userId);
+                ResultSet rs = stmt.executeQuery();
+                if (rs.next()) {
+                    String id = rs.getString("id");
+                    LogUtil.info("userId", id);
+
+                    // Check if the userId already exists in the group
+                    if (!currentUserIdList.contains(id)) {
+                        String insertQuery = "INSERT INTO dir_user_group (groupId, userId) VALUES (?, ?)";
+                        PreparedStatement istmt = con.prepareStatement(insertQuery);
+                        istmt.setString(1, groupId);
+                        istmt.setString(2, id);
+                        istmt.executeUpdate();
+                        istmt.close();
+                        LogUtil.info("Inserted user into group", id);
+                    }
+                }
+                rs.close();
+                stmt.close();
+            }
+        }
+    }
+
+    // This function will reuse workflow form binder to store data
+    public void normalStoring(Element element, FormRowSet rows, FormData formData) {
+        PluginManager pluginManager = (PluginManager) AppUtil.getApplicationContext().getBean("pluginManager");
+        FormStoreBinder binder = (FormStoreBinder) pluginManager.getPlugin("org.joget.apps.form.lib.WorkflowFormBinder");
+        binder.store(element, rows, formData);
+    }
+// }
+
+// Ensure this line is outside the class
+return store(element, rows, formData);
